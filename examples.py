@@ -2,6 +2,8 @@
 Example usage of the CatGt wrapper.
 
 This script demonstrates various ways to use the purrito CatGt wrapper.
+
+Need to update this for the new class
 """
 
 from purrito import CatGt
