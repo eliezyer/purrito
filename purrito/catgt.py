@@ -44,26 +44,35 @@ class CatGt_wrapper:
     
     def __init__(
         self,
-        catgt_path: str,
-        basepath: str,
-        run: str,
+        catgt_path: str = "CatGt",
+        basepath: str = None,
+        run: str = None,
         gate: Optional[int] = None,
         trigger: Optional[int] = None,
+        **kwargs
     ):
-        """Initialize CatGt wrapper with executable path and run info."""
+        """Initialize CatGt wrapper with executable path and run info.
+
+        Backwards-compatible: additional keyword arguments are treated as
+        CatGt options and stored in the internal options dict.
+        """
         if not catgt_path:
             raise ValueError("catgt_path cannot be empty")
         if not basepath:
             raise ValueError("basepath cannot be empty")
         if not run:
             raise ValueError("run cannot be empty")
-            
+
         self.catgt_path = catgt_path
         self.basepath = os.path.abspath(basepath)
         self.run = run
         self.gate = gate
         self.trigger = trigger
         self.options: Dict[str, Any] = {}
+
+        # Accept older-style options passed in constructor (e.g., ap=True, prb=0)
+        if kwargs:
+            self._update_options(kwargs)
         
     def set_input(
         self,
@@ -72,7 +81,7 @@ class CatGt_wrapper:
         t: Optional[str] = None,
         t_cat: Optional[str] = None,
         **kwargs
-    ) -> 'CatGt':
+    ) -> 'CatGt_wrapper':
         """
         Set input data selection options.
         
@@ -118,7 +127,7 @@ class CatGt_wrapper:
         gfix: Optional[float] = None,
         tshift: Optional[int] = None,
         **kwargs
-    ) -> 'CatGt':
+    ) -> 'CatGt_wrapper':
         """
         Set filtering and signal processing options.
         
@@ -167,14 +176,14 @@ class CatGt_wrapper:
         self._update_options(params)
         return self
     
-    def set_extraction(
+    def set_channel_extraction(
         self,
         xa: Optional[str] = None,
         xd: Optional[str] = None,
         xia: Optional[str] = None,
         xid: Optional[str] = None,
         **kwargs
-    ) -> 'CatGt':
+    ) -> 'CatGt_wrapper':
         """
         Set channel extraction options (which channels to keep in output).
         
@@ -222,7 +231,7 @@ class CatGt_wrapper:
         apfilter: Optional[str] = None,
         lffilter: Optional[str] = None,
         **kwargs
-    ) -> 'CatGt':
+    ) -> 'CatGt_wrapper':
         """
         Set output configuration options.
         
@@ -261,7 +270,7 @@ class CatGt_wrapper:
         self._update_options(params)
         return self
     
-    def set_option(self, key: str, value: Any) -> 'CatGt':
+    def set_option(self, key: str, value: Any) -> 'CatGt_wrapper':
         """
         Set a single arbitrary option not covered by grouped methods.
         
@@ -281,7 +290,7 @@ class CatGt_wrapper:
             self.options[key] = value
         return self
     
-    def set_options(self, **kwargs) -> 'CatGt':
+    def set_options(self, **kwargs) -> 'CatGt_wrapper':
         """
         Set multiple arbitrary options at once.
         
@@ -304,53 +313,34 @@ class CatGt_wrapper:
             if value is not None:
                 self.options[key] = value
     
-    def remove_option(self, key: str) -> 'CatGt':
+    def remove_option(self, key: str) -> 'CatGt_wrapper':
         """Remove an option by key."""
         self.options.pop(key, None)
         return self
     
-    def clear_options(self) -> 'CatGt':
+    def clear_options(self) -> 'CatGt_wrapper':
         """Clear all options while keeping base configuration."""
         self.options.clear()
         return self
         
-    def build_command(self) -> str:
+    def build_command(self) -> List[str]:
         """
-        Build the CatGt command line string.
-            
+        Build the CatGt command as a list suitable for subprocess.
+
         Returns
         -------
-        str
-            The complete command line string for CatGt
-            
-        Examples
-        --------
-        >>> catgt = CatGt("/usr/local/bin/CatGt", "/data", "g0", gate=0, trigger=0)
-        >>> catgt.set_filters(ap=True, loccar=2)
-        >>> cmd = catgt.build_command()
-        >>> print(cmd)
-        /usr/local/bin/CatGt -dir=/data -run=g0 -g=0 -t=0 -ap -loccar=2
+        List[str]
+            The command and its arguments as a list.
+
+        Notes
+        -----
+        This method returns a list (e.g. ["CatGt", "-dir=/data", "-run=g0", ...])
+        so it is safe to pass directly to subprocess.run(). If you need the
+        printable command string, use `dry_run()` which will join the list
+        for display purposes.
         """
-        cmd_parts = [self.catgt_path]
-        
-        # Add required directory parameter
-        cmd_parts.append(f"-dir={self.basepath}")
-        
-        # Add run parameter
-        cmd_parts.append(f"-run={self.run}")
-        
-        # Add gate if specified
-        if self.gate is not None:
-            cmd_parts.append(f"-g={self.gate}")
-            
-        # Add trigger if specified
-        if self.trigger is not None:
-            cmd_parts.append(f"-t={self.trigger}")
-        
-        # Add additional options
-        cmd_parts.extend(self._format_options())
-        
-        return " ".join(cmd_parts)
+        # Reuse get_command_args which already returns a list of args
+        return self.get_command_args()
     
     def _format_options(self) -> List[str]:
         """Format additional options as command line arguments."""
@@ -534,9 +524,11 @@ class CatGt_wrapper:
         >>> print(catgt.dry_run())
         /usr/local/bin/CatGt -dir=/data -run=g0 -g=0 -ap -loccar=2
         """
-        cmd = self.build_command()
-        print(f"Would execute: {cmd}")
-        return cmd
+        # build_command now returns a list suitable for subprocess; join for display
+        cmd_list = self.build_command()
+        cmd_str = " ".join(cmd_list)
+        print(f"Would execute: {cmd_str}")
+        return cmd_str
     
     def to_dict(self) -> Dict[str, Any]:
         """Export configuration as a dictionary."""
@@ -550,7 +542,7 @@ class CatGt_wrapper:
         }
     
     @classmethod
-    def from_dict(cls, config: Dict[str, Any]) -> 'CatGt':
+    def from_dict(cls, config: Dict[str, Any]) -> 'CatGt_wrapper':
         """
         Create a CatGt instance from a dictionary.
         
@@ -584,34 +576,10 @@ class CatGt_wrapper:
         )
     
     def __str__(self) -> str:
-        """Return the command string when converting to string."""
-        return self.build_command()
+        """Return the command string when converting to string.
 
+        Since `build_command` returns a list (for subprocess), join it for
+        human-readable output.
+        """
+        return " ".join(self.build_command())
 
-# Example usage
-if __name__ == "__main__":
-    # Example 1: Basic usage with execution
-    catgt = CatGt(
-        catgt_path="/usr/local/bin/CatGt",
-        basepath="/data/neuropixels",
-        run="g0",
-        gate=0,
-        trigger=0
-    )
-    
-    # Configure processing pipeline
-    catgt.set_input(prb=0, prb_fld=1)
-    catgt.set_filters(ap=True, lf=True, loccar=2)
-    catgt.set_output(dest="/data/processed")
-    
-    # Dry run to check command
-    catgt.dry_run()
-    
-    # Execute
-    # result = catgt.run()
-    # print(f"Processing complete with exit code: {result.returncode}")
-    
-    # Example 2: Async execution
-    # process = catgt.run_async()
-    # print(f"Started process with PID: {process.pid}")
-    # returncode = process.wait()
