@@ -17,7 +17,7 @@ def basic_example():
     catgt = CatGt_wrapper(
         catgt_path="CatGt",
         basepath="/data/neuropixels",
-        run="g0",
+        run_name="g0",
         gate=0,
         trigger=0,
     )
@@ -124,3 +124,38 @@ if __name__ == "__main__":
     multi_probe_example()
     subprocess_example()
     custom_options_example()
+
+
+#%% trying to replicate command used in lab
+
+from purrito import CatGt_wrapper
+catgt_local_path = "/Users/elie/Documents/github/CatGt/CatGt-linux/CatGt"
+basepath_local = "/Users/elie/Documents/github/CatGt/data/NPX3_11_13_25_offline2_CA_TH_g0"
+catgt_output_path = "/Users/elie/Documents/github/CatGt/data/NPX3_11_13_25_offline2_CA_TH_g0_catgt" # this will be generated automatically in pipeline
+
+# intializing CatGt wrapper
+catgt = CatGt_wrapper(
+    catgt_path=catgt_local_path, # mandatory path to CatGt executable
+    basepath=basepath_local, # mandatory basepath where data is located
+    gate=0, # optional gate number (default 0)
+    trigger=0, # optional trigger number (default 0)
+)
+
+catgt.set_input(prb=0, prb_fld=True) # setting input probe and probe field
+catgt.set_filters(ap=True, apfilter="butter,12,300,9000") # setting filters: ap, lf, gblcar
+catgt.set_filters(lf=True, lffilter="butter,12,1,600") # setting filters: ap, lf, gblcar
+catgt.set_car_options(gblcar=True) # setting gblcar option
+
+catgt.set_options({'t_miss_ok':True,'no_catgt_fld':True,'gfix':'0.4,0.1,0.02'}) # setting other options
+
+# setting output destination
+catgt.set_output(dest=catgt_output_path)
+
+# use dry run to show which command would execute
+catgt.dry_run()
+
+# execute CatGt 
+catgt.run()
+
+# other settings to add '-prb=0' ,'-prb_fld','-t_miss_ok','-ap','-lf','-apfilter=butter,12,300,9000','-lffilter=butter,12,1,600','-gblcar','-gfix=0.4,0.1,0.02','-dest=...','-no_catgt_fld'
+# %%

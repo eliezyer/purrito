@@ -12,10 +12,7 @@ CatGt is a command-line tool for preprocessing SpikeGLX data from Neuropixels pr
 pip install -e .
 ```
 
-For development:
-```bash
-pip install -e ".[dev]"
-```
+Soon this package will be sent to pypi
 
 ## Usage
 
@@ -32,10 +29,16 @@ catgt = CatGt(
     trigger=0
 )
 
+# Check the command that will be executed
+catgt.dry_run()
+
+#Output: CatGt -dir=/path/to/data -run=g0 -g=0 -t=0
+
+
+# Run catgt
+catgt.run()
 # Generate the command line string
-cmd = catgt.build_command()
-print(cmd)
-# Output: CatGt -dir=/path/to/data -run=g0 -g=0 -t=0
+
 ```
 
 ### Advanced Example with Options

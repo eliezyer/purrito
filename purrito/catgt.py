@@ -1,7 +1,7 @@
 """
 CatGt wrapper with pipeline-oriented option grouping and execution support.
 
-This design organizes options by processing stage: input → filters → extraction → output
+This design organizes options by processing stage: input > filters > extraction > output
 """
 
 import os
@@ -26,6 +26,8 @@ class CatGt_wrapper:
         Gate index
     trigger : Optional[int], default=None
         Trigger index
+    prb_fld : bool, optional
+            Whether the probe data is organized in folders
         
     Examples
     --------
@@ -44,11 +46,12 @@ class CatGt_wrapper:
     
     def __init__(
         self,
-        catgt_path: str = "CatGt",
-        basepath: str = None,
-        run: str = None,
-        gate: Optional[int] = None,
-        trigger: Optional[int] = None,
+        catgt_path: str,
+        basepath: str,
+        run_name: Optional[str] = None,
+        gate: Optional[int] = 0,
+        trigger: Optional[int] = 0,
+        prb_fld: Optional[bool] = None,
         **kwargs
     ):
         """Initialize CatGt wrapper with executable path and run info.
@@ -60,14 +63,17 @@ class CatGt_wrapper:
             raise ValueError("catgt_path cannot be empty")
         if not basepath:
             raise ValueError("basepath cannot be empty")
-        if not run:
-            raise ValueError("run cannot be empty")
+        
+        # if run_name was not provided, estimate ast the name of the basepath folder (removing _g0 etc)
+        if run_name is None:
+            run_name = os.path.basename(os.path.normpath(basepath)).split("_g0")[0]
 
         self.catgt_path = catgt_path
         self.basepath = os.path.abspath(basepath)
-        self.run = run
+        self.run_name = run_name
         self.gate = gate
         self.trigger = trigger
+        self.prb_fld = prb_fld
         self.options: Dict[str, Any] = {}
 
         # Accept older-style options passed in constructor (e.g., ap=True, prb=0)
@@ -77,7 +83,7 @@ class CatGt_wrapper:
     def set_input(
         self,
         prb: Optional[int] = None,
-        prb_fld: Optional[int] = None,
+        prb_fld: Optional[bool] = None,
         t: Optional[str] = None,
         t_cat: Optional[str] = None,
         **kwargs
@@ -89,8 +95,6 @@ class CatGt_wrapper:
         ----------
         prb : int, optional
             Probe index to process (e.g., 0, 1, 2)
-        prb_fld : int, optional
-            Probe folder organization level
         t : str, optional
             Time range for processing (e.g., "0,100" for seconds 0-100)
         t_cat : str, optional
@@ -105,7 +109,7 @@ class CatGt_wrapper:
             
         Examples
         --------
-        >>> catgt.set_input(prb=0, prb_fld=1, t="0,100")
+        >>> catgt.set_input(prb=0, t="0,100")
         """
         params = {
             'prb': prb,
@@ -126,6 +130,8 @@ class CatGt_wrapper:
         gblcar: Optional[bool] = None,
         gfix: Optional[float] = None,
         tshift: Optional[int] = None,
+        apfilter: Optional[str] = None,
+        lffilter: Optional[str] = None,
         **kwargs
     ) -> 'CatGt_wrapper':
         """
@@ -147,6 +153,10 @@ class CatGt_wrapper:
             Gain correction threshold for fixing gain errors
         tshift : int, optional
             Time shift correction in samples for synchronization
+        apfilter : str, optional
+            Custom filter specification for AP band (e.g., butter,12,300,9000)
+        lffilter : str, optional
+            Custom filter specification for LF band (e.g., butter,12,1,600)
         **kwargs
             Additional filtering options
             
@@ -171,12 +181,58 @@ class CatGt_wrapper:
             'gblcar': gblcar,
             'gfix': gfix,
             'tshift': tshift,
+            'apfilter': apfilter,
+            'lffilter': lffilter,
             **kwargs
         }
         self._update_options(params)
         return self
     
-    def set_channel_extraction(
+    def set_car_options(
+            self,
+            gblcar: Optional[bool] = None,
+            loccar: Optional[int] = None,
+            loccar_um: Optional[float] = None,
+            gbldmx: Optional[bool] = None,
+    ) -> 'CatGt_wrapper':
+        """
+        Set common average referencing options.
+        
+        Parameters
+        ----------
+        gblcar : bool, optional
+            Apply global common average reference across all channels
+        loccar : int, optional
+            Local common average reference radius (0=disable, 2 or 3=number of neighbors)
+        loccar_um : float, optional
+            Local CAR radius in micrometers
+        gbldmx : bool, optional
+            Apply global demultiplexing to output
+            
+        Returns
+        -------
+        CatGt
+            Returns self for method chaining
+            
+        Examples
+        --------
+        Apply local CAR with 2 neighbors:
+        >>> catgt.set_car_options(loccar=2)
+        
+        Apply global CAR:
+        >>> catgt.set_car_options(gblcar=True)
+        """
+        params = {
+            'gblcar': gblcar,
+            'loccar': loccar,
+            'loccar_um': loccar_um,
+            'gbldmx': gbldmx,
+        }
+        self._update_options(params)
+        return self
+    
+    
+    def set_extraction(
         self,
         xa: Optional[str] = None,
         xd: Optional[str] = None,
@@ -185,7 +241,7 @@ class CatGt_wrapper:
         **kwargs
     ) -> 'CatGt_wrapper':
         """
-        Set channel extraction options (which channels to keep in output).
+        Set extraction options .
         
         Parameters
         ----------
@@ -228,8 +284,6 @@ class CatGt_wrapper:
         dest: Optional[str] = None,
         out_prb_fld: Optional[bool] = None,
         gbldmx: Optional[bool] = None,
-        apfilter: Optional[str] = None,
-        lffilter: Optional[str] = None,
         **kwargs
     ) -> 'CatGt_wrapper':
         """
@@ -243,10 +297,6 @@ class CatGt_wrapper:
             Organize output using probe folder structure
         gbldmx : bool, optional
             Apply global demultiplexing to output
-        apfilter : str, optional
-            Path to AP filter configuration file
-        lffilter : str, optional
-            Path to LF filter configuration file
         **kwargs
             Additional output options
             
@@ -263,8 +313,6 @@ class CatGt_wrapper:
             'dest': dest,
             'out_prb_fld': out_prb_fld,
             'gbldmx': gbldmx,
-            'apfilter': apfilter,
-            'lffilter': lffilter,
             **kwargs
         }
         self._update_options(params)
@@ -290,21 +338,24 @@ class CatGt_wrapper:
             self.options[key] = value
         return self
     
-    def set_options(self, **kwargs) -> 'CatGt_wrapper':
+    def set_options(self, options: Dict[str, Any]) -> 'CatGt_wrapper':
         """
-        Set multiple arbitrary options at once.
-        
+        Set multiple arbitrary options from a dictionary.
+
         Parameters
         ----------
-        **kwargs
-            Key-value pairs of options
-            
+        options : dict
+            Dictionary of key-value pairs to set as options.
+
         Returns
         -------
-        CatGt
+        CatGt_wrapper
             Returns self for method chaining
         """
-        self._update_options(kwargs)
+        if not isinstance(options, dict):
+            raise TypeError("options must be a dict")
+        # _update_options will ignore None values
+        self._update_options(options)
         return self
     
     def _update_options(self, params: Dict[str, Any]) -> None:
@@ -348,7 +399,8 @@ class CatGt_wrapper:
         
         for key, value in self.options.items():
             # Convert Python naming convention to CatGt naming
-            option_name = key.replace("_", "-")
+            # option_name = key.replace("_", "-")
+            option_name = key
             
             if isinstance(value, bool):
                 if value:
@@ -380,7 +432,7 @@ class CatGt_wrapper:
         """
         args = [self.catgt_path]
         args.append(f"-dir={self.basepath}")
-        args.append(f"-run={self.run}")
+        args.append(f"-run={self.run_name}")
         
         if self.gate is not None:
             args.append(f"-g={self.gate}")
@@ -540,40 +592,6 @@ class CatGt_wrapper:
             'trigger': self.trigger,
             'options': self.options.copy()
         }
-    
-    @classmethod
-    def from_dict(cls, config: Dict[str, Any]) -> 'CatGt_wrapper':
-        """
-        Create a CatGt instance from a dictionary.
-        
-        Parameters
-        ----------
-        config : Dict[str, Any]
-            Configuration dictionary (from to_dict())
-            
-        Returns
-        -------
-        CatGt
-            New CatGt instance
-        """
-        instance = cls(
-            catgt_path=config['catgt_path'],
-            basepath=config['basepath'],
-            run=config['run'],
-            gate=config.get('gate'),
-            trigger=config.get('trigger'),
-        )
-        instance.options = config.get('options', {}).copy()
-        return instance
-    
-    def __repr__(self) -> str:
-        """Return a string representation of the CatGt instance."""
-        return (
-            f"CatGt(catgt_path='{self.catgt_path}', "
-            f"basepath='{self.basepath}', run='{self.run}', "
-            f"gate={self.gate}, trigger={self.trigger}, "
-            f"options={self.options})"
-        )
     
     def __str__(self) -> str:
         """Return the command string when converting to string.
