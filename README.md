@@ -55,9 +55,8 @@ catgt = CatGt(
     ap=True,           # Process AP band
     lf=True,           # Process LF band
     prb=0,             # Probe index
-    prb_fld=1,         # Probe folder
+    prb_fld=True,         # Probe folder
     dest="/data/processed",  # Output destination
-    channels=[0, 1, 2, 3]    # Channel list
 )
 
 cmd = catgt.build_command()
@@ -128,3 +127,5 @@ pytest tests/
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+Developed in [Rajasethupathy Lab](https://www.rajasethupathylab.com/)

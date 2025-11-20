@@ -392,6 +392,103 @@ class CatGt_wrapper:
         """
         # Reuse get_command_args which already returns a list of args
         return self.get_command_args()
+
+    def set_supercat(
+        self,
+        runs: List[Dict[str, str]],
+        trim_edges: bool = False,
+        skip_ni_ob_bin: bool = False,
+        dest: Optional[str] = None,
+        **kwargs
+        ) -> 'CatGt_wrapper':
+        """
+        Set supercat options for concatenating multiple runs.
+
+        Parameters
+        ----------
+        runs : List[Dict[str, str]]
+            List of dictionaries containing 'dir' and 'run_ga' keys for each run to concatenate.
+            Each dict should have:
+            - 'dir': Parent directory of the run folder
+            - 'run_ga': Run name with g-index (e.g., "myrun_g0" or "catgt_myrun_g7")
+        trim_edges : bool, optional
+            If True, trim trailing edges of files to align streams via sync edges
+        skip_ni_ob_bin : bool, optional
+            If True, skip processing NI/OB binary files (use when first pass didn't create them)
+        dest : str, optional
+            Required destination directory for supercat output
+        **kwargs
+            Additional supercat options
+            
+        Returns
+        -------
+        CatGt_wrapper
+            Returns self for method chaining
+            
+        Notes
+        -----
+        - Supercat requires that first-pass CatGt has been run on all listed runs
+        - All runs must have 'tcat' tagged output files
+        - The dest parameter is required for supercat operations
+        - Extractors used in first pass must be specified again for supercat
+
+        Examples
+        --------
+        Concatenate two runs:
+        >>> catgt = CatGt_wrapper(
+        ...     catgt_path="/usr/local/bin/CatGt",
+        ...     basepath="/data",  # This will be ignored for supercat
+        ...     run_name="combined"  # This will be ignored for supercat
+        ... )
+        >>> runs = [
+        ...     {'dir': '/data/run1', 'run_ga': 'experiment1_g0'},
+        ...     {'dir': '/data/run2', 'run_ga': 'experiment2_g0'}
+        ... ]
+        >>> catgt.set_supercat(runs, trim_edges=True, dest="/data/output")
+        >>> catgt.set_filters(ap=True, lf=True)  # Specify which streams to supercat
+        >>> result = catgt.run()
+
+        With catgt_ output folders from first pass:
+        >>> runs = [
+        ...     {'dir': '/data/output', 'run_ga': 'catgt_run1_g0'},
+        ...     {'dir': '/data/output', 'run_ga': 'catgt_run2_g0'}
+        ... ]
+        >>> catgt.set_supercat(runs, dest="/data/final")
+        """
+
+        if not runs or not isinstance(runs, list):
+            raise ValueError("runs must be a non-empty list of dictionaries")
+
+        if not dest:
+            raise ValueError("dest parameter is required for supercat operations")
+
+        # Validate each run entry
+        for i, run in enumerate(runs):
+            if not isinstance(run, dict):
+                raise ValueError(f"Run entry {i} must be a dictionary")
+            if 'dir' not in run or 'run_ga' not in run:
+                raise ValueError(f"Run entry {i} must contain 'dir' and 'run_ga' keys")
+
+        # Build the supercat string: {dir,run_ga}{dir,run_ga}...
+        supercat_elements = [f"{{{run['dir']},{run['run_ga']}}}" for run in runs]
+        supercat_str = ''.join(supercat_elements)
+
+        params = {
+            'supercat': supercat_str,
+            'dest': dest,
+        }
+
+        if trim_edges:
+            params['supercat_trim_edges'] = True
+
+        if skip_ni_ob_bin:
+            params['supercat_skip_ni_ob_bin'] = True
+
+        # Add any additional kwargs
+        params.update(kwargs)
+
+        self._update_options(params)
+        return self
     
     def _format_options(self) -> List[str]:
         """Format additional options as command line arguments."""
@@ -600,4 +697,72 @@ class CatGt_wrapper:
         human-readable output.
         """
         return " ".join(self.build_command())
+    
+    @staticmethod
+    def parse_fyi_supercat_element(fyi_path: str) -> Dict[str, str]:
+        """
+        Parse a supercat element from a CatGt FYI file.
+        
+        Parameters
+        ----------
+        fyi_path : str
+            Path to the run_ga_fyi.txt file from a first-pass CatGt run
+            
+        Returns
+        -------
+        Dict[str, str]
+            Dictionary with 'dir' and 'run_ga' keys suitable for set_supercat()
+            
+        Examples
+        --------
+        >>> element = CatGt_wrapper.parse_fyi_supercat_element("/data/run1_g0_fyi.txt")
+        >>> runs = [element]
+        >>> catgt.set_supercat(runs, dest="/data/output")
+        """
+        import re
+        
+        if not os.path.exists(fyi_path):
+            raise FileNotFoundError(f"FYI file not found: {fyi_path}")
+        
+        with open(fyi_path, 'r') as f:
+            content = f.read()
+        
+        # Look for the supercat_element line
+        match = re.search(r'supercat_element=\{([^,]+),([^}]+)\}', content)
+        if not match:
+            raise ValueError(f"No supercat_element found in {fyi_path}")
+        
+        return {
+            'dir': match.group(1),
+            'run_ga': match.group(2)
+        }
+
+    @staticmethod
+    def build_supercat_from_fyi_files(fyi_paths: List[str]) -> List[Dict[str, str]]:
+        """
+        Build a runs list for supercat from multiple FYI files.
+        
+        Parameters
+        ----------
+        fyi_paths : List[str]
+            List of paths to FYI files from first-pass CatGt runs
+            
+        Returns
+        -------
+        List[Dict[str, str]]
+            List of run dictionaries suitable for set_supercat()
+            
+        Examples
+        --------
+        >>> fyi_files = [
+        ...     "/data/run1/run1_g0_fyi.txt",
+        ...     "/data/run2/run2_g0_fyi.txt"
+        ... ]
+        >>> runs = CatGt_wrapper.build_supercat_from_fyi_files(fyi_files)
+        >>> catgt.set_supercat(runs, dest="/data/combined")
+        """
+        runs = []
+        for fyi_path in fyi_paths:
+            runs.append(CatGt_wrapper.parse_fyi_supercat_element(fyi_path))
+        return runs 
 

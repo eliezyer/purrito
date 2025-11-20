@@ -158,4 +158,38 @@ catgt.dry_run()
 catgt.run()
 
 # other settings to add '-prb=0' ,'-prb_fld','-t_miss_ok','-ap','-lf','-apfilter=butter,12,300,9000','-lffilter=butter,12,1,600','-gblcar','-gfix=0.4,0.1,0.02','-dest=...','-no_catgt_fld'
+# %% example running supercat to concatenate the data
+# Method 1: Manual specification
+from purrito import CatGt_wrapper
+catgt = CatGt_wrapper(
+    catgt_path="/usr/local/bin/CatGt",
+    basepath="/data",  # Just a placeholder. Not used for supercat, but required
+    run_name="combined", # Just a placeholder. Not used for supercat, but required
+    gate=0, # Ignored in supercat
+    trigger=0  # Ignored in supercat
+)
+
+runs = [
+    {'dir': '/data/output', 'run_ga': 'catgt_exp1_g0'},
+    {'dir': '/data/output', 'run_ga': 'catgt_exp2_g0'},
+    {'dir': '/data/output', 'run_ga': 'catgt_exp3_g0'}
+]
+
+catgt.set_supercat(runs, trim_edges=True, dest="/data/final")
+catgt.set_filters(ap=True, lf=True)  # Which streams to supercat
+catgt.set_input(prb=0)  # Which probes to supercat
+
+# If you used extractors in first pass, specify them again
+catgt.set_extraction(xd="2,0,384,6,500")
+
+result = catgt.dry_run()
+
+# Method 2: Using FYI files
+fyi_files = [
+    "/data/run1/run1_g0_fyi.txt",
+    "/data/run2/run2_g0_fyi.txt"
+]
+runs = CatGt_wrapper.build_supercat_from_fyi_files(fyi_files)
+catgt.set_supercat(runs, dest="/data/combined")
+
 # %%
