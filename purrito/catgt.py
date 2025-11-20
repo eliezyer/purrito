@@ -121,11 +121,38 @@ class CatGt_wrapper:
         self._update_options(params)
         return self
     
-    def set_filters(
+    def set_streams(
         self,
         ap: Optional[bool] = None,
         lf: Optional[bool] = None,
         ni: Optional[bool] = None,
+        ob: Optional[bool] = None,
+    ) -> 'CatGt_wrapper':
+    """ Set streams to process
+    Parameters
+        ----------
+        ap : bool, optional
+            Process AP (action potential) band data
+        lf : bool, optional
+            Process LF (local field potential) band data
+        ni : bool, optional
+            Process NI (National Instruments) channels
+        ob : bool, optional
+            Process OB (OneBox) channels
+        
+        """
+
+        params = {
+            'ap': ap,
+            'lf': lf,
+            'ni': ni,
+            'ob': ob,
+        }
+        self._update_options(params)
+        return self
+    
+    def set_filters(
+        self,
         loccar: Optional[int] = None,
         gblcar: Optional[bool] = None,
         gfix: Optional[float] = None,
