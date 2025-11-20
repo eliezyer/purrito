@@ -40,7 +40,6 @@ class CatGt_wrapper:
     ...     trigger=0
     ... )
     >>> catgt.set_filters(ap=True, lf=True, loccar=2)
-    >>> catgt.set_extraction(prb=0, prb_fld=1)
     >>> result = catgt.run()
     """
     
@@ -127,6 +126,7 @@ class CatGt_wrapper:
         lf: Optional[bool] = None,
         ni: Optional[bool] = None,
         ob: Optional[bool] = None,
+        obx: Optional[int] = None,
     ) -> 'CatGt_wrapper':
         """ Set streams to process
         Parameters
@@ -147,6 +147,7 @@ class CatGt_wrapper:
             'lf': lf,
             'ni': ni,
             'ob': ob,
+            'obx': obx,
         }
         self._update_options(params)
         return self
