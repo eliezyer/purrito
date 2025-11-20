@@ -128,8 +128,8 @@ class CatGt_wrapper:
         ni: Optional[bool] = None,
         ob: Optional[bool] = None,
     ) -> 'CatGt_wrapper':
-    """ Set streams to process
-    Parameters
+        """ Set streams to process
+        Parameters
         ----------
         ap : bool, optional
             Process AP (action potential) band data
