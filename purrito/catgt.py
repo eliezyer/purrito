@@ -9,6 +9,7 @@ import subprocess
 from typing import Optional, List, Dict, Any, Union
 from pathlib import Path
 
+# TODO:
 
 class CatGt_wrapper:
     """
@@ -706,6 +707,99 @@ class CatGt_wrapper:
         cmd_str = " ".join(cmd_list)
         print(f"Would execute: {cmd_str}")
         return cmd_str
+    
+    def clone(
+        self,
+        basepath: Optional[str] = None,
+        run_name: Optional[str] = None,
+        gate: Optional[int] = None,
+        trigger: Optional[int] = None,
+        dest: Optional[str] = None,
+        preserve_dest: bool = True,
+        **kwargs
+        ) -> 'CatGt_wrapper':
+        """
+        Create a new CatGt_wrapper instance with modified input/output options.
+        
+        All processing options (filters, extraction, CAR, etc.) are copied to the new
+        instance. Only the specified parameters are changed.
+        
+        Parameters
+        ----------
+        basepath : str, optional
+            New base directory path. If None, uses current basepath
+        run_name : str, optional
+            New run name. If None, uses current run_name
+        gate : int, optional
+            New gate index. If None, uses current gate
+        trigger : int, optional
+            New trigger index. If None, uses current trigger
+        dest : str, optional
+            New destination directory. If None and preserve_dest=True, uses current dest
+        preserve_dest : bool, default=True
+            If True and dest is None, copy the current dest option from self.options
+            If False and dest is None, remove dest from the cloned instance
+        **kwargs
+            Additional options to override in the new instance
+            
+        Returns
+        -------
+        CatGt_wrapper
+            New instance with modified parameters
+            
+        Examples
+        --------
+        Process multiple runs with same settings:
+        >>> # Set up base configuration
+        >>> catgt = CatGt_wrapper(
+        ...     catgt_path="/usr/local/bin/CatGt",
+        ...     basepath="/data/run1",
+        ...     run_name="exp1",
+        ...     gate=0
+        ... )
+        >>> catgt.set_filters(ap=True, loccar=2)
+        >>> catgt.set_output(dest="/processed")
+        >>> 
+        >>> # Process first run
+        >>> catgt.run()
+        >>> 
+        >>> # Clone for second run with same settings
+        >>> catgt2 = catgt.clone(basepath="/data/run2", run_name="exp2")
+        >>> catgt2.run()
+        >>> 
+        >>> # Clone for third run with different output
+        >>> catgt3 = catgt.clone(
+        ...     basepath="/data/run3",
+        ...     run_name="exp3",
+        ...     dest="/processed/batch2"
+        ... )
+        >>> catgt3.run()
+        """
+        
+        # Create new instance with updated base parameters
+        new_catgt = CatGt_wrapper(
+            catgt_path=self.catgt_path,
+            basepath=basepath if basepath is not None else self.basepath,
+            run_name=run_name if run_name is not None else self.run_name,
+            gate=gate if gate is not None else self.gate,
+            trigger=trigger if trigger is not None else self.trigger,
+            prb_fld=self.prb_fld
+        )
+        
+        # Deep copy all options
+        new_catgt.options = self.options.copy()
+        
+        # Handle dest parameter specially
+        if dest is not None:
+            new_catgt.options['dest'] = dest
+        elif not preserve_dest:
+            new_catgt.options.pop('dest', None)
+        # If dest is None and preserve_dest is True, keep the copied dest
+        
+        # Apply any additional kwargs
+        new_catgt._update_options(kwargs)
+        
+        return new_catgt
     
     def to_dict(self) -> Dict[str, Any]:
         """Export configuration as a dictionary."""
