@@ -9,10 +9,13 @@ CatGt is a command-line tool for preprocessing SpikeGLX data from Neuropixels pr
 ## Installation
 
 ```bash
-pip install -e .
+pip install purrito
 ```
 
-Soon this package will be sent to pypi
+For development:
+```bash
+pip install -e .
+```
 
 ## Usage
 
@@ -123,6 +126,42 @@ Or with pytest (if installed):
 ```bash
 pytest tests/
 ```
+
+## Releasing to PyPI
+
+This package is automatically published to PyPI when a new GitHub release is created. To create a new release:
+
+1. Update the version number in:
+   - `setup.py`
+   - `purrito/__init__.py`
+
+2. Create a new GitHub release:
+   - Go to the repository's [Releases page](https://github.com/eliezyer/purrito/releases)
+   - Click "Draft a new release"
+   - Create a new tag (e.g., `v0.1.1`)
+   - Fill in the release title and description
+   - Click "Publish release"
+
+3. The GitHub Actions workflow will automatically:
+   - Build the package
+   - Run quality checks
+   - Publish to PyPI
+
+### PyPI Setup (One-time)
+
+Before the first release, you need to configure PyPI trusted publishing:
+
+1. Go to [PyPI](https://pypi.org/) and create an account if you don't have one
+2. Create the `purrito` project on PyPI (or wait for the first upload)
+3. Go to your project's settings on PyPI
+4. Under "Publishing", add a new "trusted publisher"
+5. Configure it with:
+   - Owner: `eliezyer`
+   - Repository: `purrito`
+   - Workflow: `publish-to-pypi.yml`
+   - Environment: (leave empty)
+
+This allows GitHub Actions to publish directly to PyPI without needing API tokens.
 
 ## License
 
