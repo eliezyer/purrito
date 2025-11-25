@@ -203,9 +203,6 @@ class CatGt_wrapper:
         >>> catgt.set_filters(ap=True, lf=True, gblcar=True)
         """
         params = {
-            'ap': ap,
-            'lf': lf,
-            'ni': ni,
             'loccar': loccar,
             'gblcar': gblcar,
             'gfix': gfix,
@@ -263,49 +260,58 @@ class CatGt_wrapper:
     
     def set_extraction(
         self,
-        xa: Optional[str] = None,
-        xd: Optional[str] = None,
-        xia: Optional[str] = None,
-        xid: Optional[str] = None,
+        xa: Optional[Union[str, List[str]]] = None,
+        xd: Optional[Union[str, List[str]]] = None,
+        xia: Optional[Union[str, List[str]]] = None,
+        xid: Optional[Union[str, List[str]]] = None,
         **kwargs
     ) -> 'CatGt_wrapper':
         """
-        Set extraction options .
+        Set extraction options.
         
         Parameters
         ----------
-        xa : str, optional
-            Analog channel extraction pattern (e.g., "0:10" for channels 0-10)
-        xd : str, optional
-            Digital channel extraction pattern
-        xia : str, optional
-            Imec analog channel extraction pattern
-        xid : str, optional
-            Imec digital channel extraction pattern
+        xa : str or list of str, optional
+            Analog channel extraction pattern(s) (e.g., "0:10" for channels 0-10).
+            Can pass a single pattern string or a list of pattern strings; each
+            will be added as a separate -xa option.
+        xd : str or list of str, optional
+            Digital channel extraction pattern(s). Can pass a single pattern string
+            or a list of pattern strings; each will be added as a separate -xd option.
+        xia : str or list of str, optional
+            Imec analog channel extraction pattern(s). Same semantics as xa.
+        xid : str or list of str, optional
+            Imec digital channel extraction pattern(s). Same semantics as xd.
         **kwargs
             Additional extraction options
             
         Returns
         -------
-        CatGt
+        CatGt_wrapper
             Returns self for method chaining
-            
-        Examples
-        --------
-        Extract specific analog channels:
-        >>> catgt.set_extraction(xa="0:10,20:30")
-        
-        Extract Imec analog channels:
-        >>> catgt.set_extraction(xia="0:383")
         """
-        params = {
-            'xa': xa,
-            'xd': xd,
-            'xia': xia,
-            'xid': xid,
-            **kwargs
-        }
-        self._update_options(params)
+        # Initialize extraction dict if it doesn't exist
+        if not hasattr(self, 'extraction'):
+            self.extraction = {}
+        
+        # Handle xa - normalize to list
+        if xa is not None:
+            self.extraction['xa'] = [xa] if isinstance(xa, str) else list(xa)
+        
+        # Handle xd - normalize to list
+        if xd is not None:
+            self.extraction['xd'] = [xd] if isinstance(xd, str) else list(xd)
+        
+        # Handle xia - normalize to list
+        if xia is not None:
+            self.extraction['xia'] = [xia] if isinstance(xia, str) else list(xia)
+        
+        # Handle xid - normalize to list
+        if xid is not None:
+            self.extraction['xid'] = [xid] if isinstance(xid, str) else list(xid)
+        
+        # Handle additional kwargs
+        self._update_options(kwargs)
         return self
     
     def set_output(
@@ -564,7 +570,14 @@ class CatGt_wrapper:
             args.append(f"-g={self.gate}")
         if self.trigger is not None:
             args.append(f"-t={self.trigger}")
-            
+
+        # Handle extraction options (xa, xd, xia, xid) - each list item becomes separate arg
+        if hasattr(self, 'extraction'):
+            for key in ['xa', 'xd', 'xia', 'xid']:
+                if key in self.extraction:
+                    for item in self.extraction[key]:
+                        args.append(f"-{key}={item}")
+                
         args.extend(self._format_options())
         
         return args

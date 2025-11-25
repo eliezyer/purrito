@@ -142,9 +142,12 @@ catgt = CatGt_wrapper(
 )
 
 catgt.set_input(prb=0, prb_fld=True) # setting input probe and probe field
-catgt.set_filters(ap=True, apfilter="butter,12,300,9000") # setting filters: ap, lf, gblcar
-catgt.set_filters(lf=True, lffilter="butter,12,1,600") # setting filters: ap, lf, gblcar
+catgt.set_streams(ap=True, ob=True) # setting streams: ap, ob
+catgt.set_filters(apfilter="butter,12,300,9000") # setting filters: ap, lf, gblcar
+catgt.set_filters(lffilter="butter,12,1,600") # setting filters: ap, lf, gblcar
 catgt.set_car_options(gblcar=True) # setting gblcar option
+extraction_list = ['0,0,8,1,0','0,0,8,2,0','0,0,8,3,0','0,0,8,4,0']
+catgt.set_extraction(xd=extraction_list) # setting extraction details
 
 catgt.set_options({'t_miss_ok':True,'no_catgt_fld':True,'gfix':'0.4,0.1,0.02'}) # setting other options
 
@@ -155,7 +158,7 @@ catgt.set_output(dest=catgt_output_path)
 catgt.dry_run()
 
 # execute CatGt 
-catgt.run()
+# catgt.run()
 
 # other settings to add '-prb=0' ,'-prb_fld','-t_miss_ok','-ap','-lf','-apfilter=butter,12,300,9000','-lffilter=butter,12,1,600','-gblcar','-gfix=0.4,0.1,0.02','-dest=...','-no_catgt_fld'
 # %% example running supercat to concatenate the data
