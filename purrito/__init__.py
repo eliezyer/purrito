@@ -1,11 +1,8 @@
-"""
-Purrito - A Python wrapper for CatGt
-"""
+"""Purrito public package exports."""
 
-from .catgt import CatGt_wrapper
+from .catgt import CatGtWrapper, CatGt_wrapper
 
-# Backwards-compatible public name
 CatGt = CatGt_wrapper
 
 __version__ = "0.1.0"
-__all__ = ["CatGt", "CatGt_wrapper"]
+__all__ = ["CatGt", "CatGtWrapper", "CatGt_wrapper"]

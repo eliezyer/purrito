@@ -1,126 +1,145 @@
-"""
-CatGt wrapper with pipeline-oriented option grouping and execution support.
+"""Utilities for building and executing CatGt commands."""
 
-This design organizes options by processing stage: input > filters > extraction > output
-"""
+from __future__ import annotations
 
+import copy
 import os
+import re
+import shlex
 import subprocess
-from typing import Optional, List, Dict, Any, Union
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence, Union
 
-# TODO:
+
+EXTRACTION_KEYS = ("xa", "xd", "xia", "xid")
+
+
+def _looks_like_catgt_executable(value: object) -> bool:
+    """Best-effort detection for legacy positional constructor calls."""
+    name = os.path.basename(str(value))
+    return name.lower().startswith("catgt")
+
+
+def _derive_run_name(basepath: str) -> str:
+    """Infer a CatGt run name from the input folder name."""
+    folder_name = os.path.basename(os.path.normpath(basepath))
+    return re.split(r"_g\d+", folder_name, maxsplit=1)[0] or folder_name
+
+
+def _normalize_option_name(key: str) -> str:
+    """Normalize option keys to CatGt's underscore-based CLI spelling."""
+    return key.lstrip("-").replace("-", "_")
+
 
 class CatGt_wrapper:
-    """
-    A Python wrapper class for CatGt command-line tool with pipeline-oriented option setting.
-    
-    Parameters
-    ----------
-    catgt_path : str
-        Path to the CatGt executable
-    basepath : str
-        Base directory path containing the SpikeGLX data
-    run : str
-        Run name (e.g., "D1R_CRE_001_HPC")
-    gate : Optional[int], default=None
-        Gate index
-    trigger : Optional[int], default=None
-        Trigger index
-    prb_fld : bool, optional
-            Whether the probe data is organized in folders
-        
-    Examples
-    --------
-    Basic usage:
-    >>> catgt = CatGt_wrapper(
-    ...     catgt_path="/usr/local/bin/CatGt",
-    ...     basepath="/path/to/data",
-    ...     run="D1R_CRE_001_HPC",
-    ...     gate=0,
-    ...     trigger=0
-    ... )
-    >>> catgt.set_filters(ap=True, lf=True, loccar=2)
-    >>> result = catgt.run()
-    """
-    
+    """A Python wrapper for building CatGt command lines."""
+
     def __init__(
         self,
-        catgt_path: str,
-        basepath: str,
+        *args: object,
+        basepath: Optional[Union[str, os.PathLike[str]]] = None,
+        run: Optional[str] = None,
+        gate: Optional[int] = None,
+        trigger: Optional[int] = None,
+        catgt_path: Union[str, os.PathLike[str]] = "CatGt",
         run_name: Optional[str] = None,
-        gate: Optional[int] = 0,
-        trigger: Optional[int] = 0,
-        prb_fld: Optional[bool] = None,
-        **kwargs
-    ):
-        """Initialize CatGt wrapper with executable path and run info.
+        prb_fld: Optional[Union[bool, int]] = None,
+        **kwargs: Any,
+    ) -> None:
+        basepath, run, catgt_path = self._parse_constructor_args(
+            args=args,
+            basepath=basepath,
+            run=run,
+            catgt_path=catgt_path,
+            run_name=run_name,
+        )
+        resolved_run = run if run is not None else run_name
 
-        Backwards-compatible: additional keyword arguments are treated as
-        CatGt options and stored in the internal options dict.
-        """
+        if basepath is None:
+            raise ValueError("basepath cannot be empty")
+
+        if resolved_run is None:
+            resolved_run = _derive_run_name(os.fspath(basepath))
+
         if not catgt_path:
             raise ValueError("catgt_path cannot be empty")
-        if not basepath:
-            raise ValueError("basepath cannot be empty")
-        
-        # if run_name was not provided, estimate ast the name of the basepath folder (removing _g0 etc)
-        if run_name is None:
-            run_name = os.path.basename(os.path.normpath(basepath)).split("_g0")[0]
 
-        self.catgt_path = catgt_path
-        self.basepath = os.path.abspath(basepath)
-        self.run_name = run_name
+        self.catgt_path = os.fspath(catgt_path)
+        self.basepath = os.path.abspath(os.fspath(basepath))
+        self.run = resolved_run
         self.gate = gate
         self.trigger = trigger
-        self.prb_fld = prb_fld
         self.options: Dict[str, Any] = {}
+        self.extraction: Dict[str, List[str]] = {}
 
-        # Accept older-style options passed in constructor (e.g., ap=True, prb=0)
-        if kwargs:
-            self._update_options(kwargs)
-        
+        if prb_fld is not None:
+            kwargs["prb_fld"] = prb_fld
+        self._update_options(kwargs)
+
+    @staticmethod
+    def _parse_constructor_args(
+        *,
+        args: Sequence[object],
+        basepath: Optional[Union[str, os.PathLike[str]]],
+        run: Optional[str],
+        catgt_path: Union[str, os.PathLike[str]],
+        run_name: Optional[str],
+    ) -> tuple[Optional[Union[str, os.PathLike[str]]], Optional[str], Union[str, os.PathLike[str]]]:
+        """Support both the repo's documented API and the legacy constructor."""
+        if run is not None and run_name is not None and run != run_name:
+            raise ValueError("run and run_name must match when both are provided")
+
+        if not args:
+            return basepath, run, catgt_path
+
+        if len(args) == 1:
+            if basepath is not None:
+                raise TypeError("basepath was provided both positionally and by keyword")
+            return args[0], run, catgt_path
+
+        if len(args) == 2:
+            if basepath is not None or run is not None or run_name is not None:
+                raise TypeError("ambiguous constructor arguments")
+            first, second = args
+            if _looks_like_catgt_executable(first):
+                return second, None, first
+            return first, str(second), catgt_path
+
+        if len(args) == 3:
+            if basepath is not None or run is not None or run_name is not None:
+                raise TypeError("ambiguous constructor arguments")
+            return args[1], str(args[2]), args[0]
+
+        raise TypeError("CatGt accepts at most three positional arguments")
+
+    @property
+    def run_name(self) -> str:
+        """Backward-compatible alias for the public run name."""
+        return self.run
+
+    @run_name.setter
+    def run_name(self, value: str) -> None:
+        self.run = value
+
     def set_input(
         self,
         prb: Optional[int] = None,
-        prb_fld: Optional[bool] = None,
+        prb_fld: Optional[Union[bool, int]] = None,
         t: Optional[str] = None,
         t_cat: Optional[str] = None,
-        **kwargs
-    ) -> 'CatGt_wrapper':
-        """
-        Set input data selection options.
-        
-        Parameters
-        ----------
-        prb : int, optional
-            Probe index to process (e.g., 0, 1, 2)
-        t : str, optional
-            Time range for processing (e.g., "0,100" for seconds 0-100)
-        t_cat : str, optional
-            Time range for concatenation operations
-        **kwargs
-            Additional input options
-            
-        Returns
-        -------
-        CatGt
-            Returns self for method chaining
-            
-        Examples
-        --------
-        >>> catgt.set_input(prb=0, t="0,100")
-        """
-        params = {
-            'prb': prb,
-            'prb_fld': prb_fld,
-            't': t,
-            't_cat': t_cat,
-            **kwargs
-        }
-        self._update_options(params)
+        **kwargs: Any,
+    ) -> "CatGt_wrapper":
+        self._update_options(
+            {
+                "prb": prb,
+                "prb_fld": prb_fld,
+                "t": t,
+                "t_cat": t_cat,
+                **kwargs,
+            }
+        )
         return self
-    
+
     def set_streams(
         self,
         ap: Optional[bool] = None,
@@ -128,776 +147,332 @@ class CatGt_wrapper:
         ni: Optional[bool] = None,
         ob: Optional[bool] = None,
         obx: Optional[int] = None,
-    ) -> 'CatGt_wrapper':
-        """ Set streams to process
-        Parameters
-        ----------
-        ap : bool, optional
-            Process AP (action potential) band data
-        lf : bool, optional
-            Process LF (local field potential) band data
-        ni : bool, optional
-            Process NI (National Instruments) channels
-        ob : bool, optional
-            Process OB (OneBox) channels
-        
-        """
-
-        params = {
-            'ap': ap,
-            'lf': lf,
-            'ni': ni,
-            'ob': ob,
-            'obx': obx,
-        }
-        self._update_options(params)
+    ) -> "CatGt_wrapper":
+        self._update_options(
+            {
+                "ap": ap,
+                "lf": lf,
+                "ni": ni,
+                "ob": ob,
+                "obx": obx,
+            }
+        )
         return self
-    
+
     def set_filters(
         self,
         loccar: Optional[int] = None,
         gblcar: Optional[bool] = None,
-        gfix: Optional[float] = None,
+        gfix: Optional[Union[float, str]] = None,
         tshift: Optional[int] = None,
         apfilter: Optional[str] = None,
         lffilter: Optional[str] = None,
-        **kwargs
-    ) -> 'CatGt_wrapper':
-        """
-        Set filtering and signal processing options.
-        
-        Parameters
-        ----------
-        ap : bool, optional
-            Process AP (action potential) band data
-        lf : bool, optional
-            Process LF (local field potential) band data
-        ni : bool, optional
-            Process NI (National Instruments) channels
-        loccar : int, optional
-            Local common average reference radius (0=disable, 2 or 3=number of neighbors)
-        gblcar : bool, optional
-            Apply global common average reference across all channels
-        gfix : float, optional
-            Gain correction threshold for fixing gain errors
-        tshift : int, optional
-            Time shift correction in samples for synchronization
-        apfilter : str, optional
-            Custom filter specification for AP band (e.g., butter,12,300,9000)
-        lffilter : str, optional
-            Custom filter specification for LF band (e.g., butter,12,1,600)
-        **kwargs
-            Additional filtering options
-            
-        Returns
-        -------
-        CatGt
-            Returns self for method chaining
-            
-        Examples
-        --------
-        Apply local CAR with 2 neighbors to AP band:
-        >>> catgt.set_filters(ap=True, loccar=2)
-        
-        Apply global CAR to both AP and LF:
-        >>> catgt.set_filters(ap=True, lf=True, gblcar=True)
-        """
-        params = {
-            'loccar': loccar,
-            'gblcar': gblcar,
-            'gfix': gfix,
-            'tshift': tshift,
-            'apfilter': apfilter,
-            'lffilter': lffilter,
-            **kwargs
-        }
-        self._update_options(params)
+        **kwargs: Any,
+    ) -> "CatGt_wrapper":
+        self._update_options(
+            {
+                "loccar": loccar,
+                "gblcar": gblcar,
+                "gfix": gfix,
+                "tshift": tshift,
+                "apfilter": apfilter,
+                "lffilter": lffilter,
+                **kwargs,
+            }
+        )
         return self
-    
+
     def set_car_options(
-            self,
-            gblcar: Optional[bool] = None,
-            loccar: Optional[int] = None,
-            loccar_um: Optional[float] = None,
-            gbldmx: Optional[bool] = None,
-    ) -> 'CatGt_wrapper':
-        """
-        Set common average referencing options.
-        
-        Parameters
-        ----------
-        gblcar : bool, optional
-            Apply global common average reference across all channels
-        loccar : int, optional
-            Local common average reference radius (0=disable, 2 or 3=number of neighbors)
-        loccar_um : float, optional
-            Local CAR radius in micrometers
-        gbldmx : bool, optional
-            Apply global demultiplexing to output
-            
-        Returns
-        -------
-        CatGt
-            Returns self for method chaining
-            
-        Examples
-        --------
-        Apply local CAR with 2 neighbors:
-        >>> catgt.set_car_options(loccar=2)
-        
-        Apply global CAR:
-        >>> catgt.set_car_options(gblcar=True)
-        """
-        params = {
-            'gblcar': gblcar,
-            'loccar': loccar,
-            'loccar_um': loccar_um,
-            'gbldmx': gbldmx,
-        }
-        self._update_options(params)
+        self,
+        gblcar: Optional[bool] = None,
+        loccar: Optional[int] = None,
+        loccar_um: Optional[float] = None,
+        gbldmx: Optional[bool] = None,
+    ) -> "CatGt_wrapper":
+        self._update_options(
+            {
+                "gblcar": gblcar,
+                "loccar": loccar,
+                "loccar_um": loccar_um,
+                "gbldmx": gbldmx,
+            }
+        )
         return self
-    
-    
+
     def set_extraction(
         self,
-        xa: Optional[Union[str, List[str]]] = None,
-        xd: Optional[Union[str, List[str]]] = None,
-        xia: Optional[Union[str, List[str]]] = None,
-        xid: Optional[Union[str, List[str]]] = None,
-        **kwargs
-    ) -> 'CatGt_wrapper':
-        """
-        Set extraction options.
-        
-        Parameters
-        ----------
-        xa : str or list of str, optional
-            Analog channel extraction pattern(s) (e.g., "0:10" for channels 0-10).
-            Can pass a single pattern string or a list of pattern strings; each
-            will be added as a separate -xa option.
-        xd : str or list of str, optional
-            Digital channel extraction pattern(s). Can pass a single pattern string
-            or a list of pattern strings; each will be added as a separate -xd option.
-        xia : str or list of str, optional
-            Imec analog channel extraction pattern(s). Same semantics as xa.
-        xid : str or list of str, optional
-            Imec digital channel extraction pattern(s). Same semantics as xd.
-        **kwargs
-            Additional extraction options
-            
-        Returns
-        -------
-        CatGt_wrapper
-            Returns self for method chaining
-        """
-        # Initialize extraction dict if it doesn't exist
-        if not hasattr(self, 'extraction'):
-            self.extraction = {}
-        
-        # Handle xa - normalize to list
-        if xa is not None:
-            self.extraction['xa'] = [xa] if isinstance(xa, str) else list(xa)
-        
-        # Handle xd - normalize to list
-        if xd is not None:
-            self.extraction['xd'] = [xd] if isinstance(xd, str) else list(xd)
-        
-        # Handle xia - normalize to list
-        if xia is not None:
-            self.extraction['xia'] = [xia] if isinstance(xia, str) else list(xia)
-        
-        # Handle xid - normalize to list
-        if xid is not None:
-            self.extraction['xid'] = [xid] if isinstance(xid, str) else list(xid)
-        
-        # Handle additional kwargs
+        xa: Optional[Union[str, Sequence[object]]] = None,
+        xd: Optional[Union[str, Sequence[object]]] = None,
+        xia: Optional[Union[str, Sequence[object]]] = None,
+        xid: Optional[Union[str, Sequence[object]]] = None,
+        **kwargs: Any,
+    ) -> "CatGt_wrapper":
+        for key, value in {"xa": xa, "xd": xd, "xia": xia, "xid": xid}.items():
+            if value is None:
+                continue
+            if isinstance(value, str):
+                items = [value]
+            else:
+                items = [str(item) for item in value]
+            self.extraction[key] = items
+
         self._update_options(kwargs)
         return self
-    
+
     def set_output(
         self,
-        dest: Optional[str] = None,
-        out_prb_fld: Optional[bool] = None,
+        dest: Optional[Union[str, os.PathLike[str]]] = None,
+        out_prb_fld: Optional[Union[bool, int]] = None,
         gbldmx: Optional[bool] = None,
-        **kwargs
-    ) -> 'CatGt_wrapper':
-        """
-        Set output configuration options.
-        
-        Parameters
-        ----------
-        dest : str, optional
-            Destination directory for processed files (default: input directory)
-        out_prb_fld : bool, optional
-            Organize output using probe folder structure
-        gbldmx : bool, optional
-            Apply global demultiplexing to output
-        **kwargs
-            Additional output options
-            
-        Returns
-        -------
-        CatGt
-            Returns self for method chaining
-            
-        Examples
-        --------
-        >>> catgt.set_output(dest="/data/processed", out_prb_fld=True)
-        """
-        params = {
-            'dest': dest,
-            'out_prb_fld': out_prb_fld,
-            'gbldmx': gbldmx,
-            **kwargs
-        }
-        self._update_options(params)
+        **kwargs: Any,
+    ) -> "CatGt_wrapper":
+        self._update_options(
+            {
+                "dest": os.fspath(dest) if dest is not None else None,
+                "out_prb_fld": out_prb_fld,
+                "gbldmx": gbldmx,
+                **kwargs,
+            }
+        )
         return self
-    
-    def set_option(self, key: str, value: Any) -> 'CatGt_wrapper':
-        """
-        Set a single arbitrary option not covered by grouped methods.
-        
-        Parameters
-        ----------
-        key : str
-            Option name (underscores will be converted to dashes)
-        value : Any
-            Option value
-            
-        Returns
-        -------
-        CatGt
-            Returns self for method chaining
-        """
-        if value is not None:
-            self.options[key] = value
-        return self
-    
-    def set_options(self, options: Dict[str, Any]) -> 'CatGt_wrapper':
-        """
-        Set multiple arbitrary options from a dictionary.
-
-        Parameters
-        ----------
-        options : dict
-            Dictionary of key-value pairs to set as options.
-
-        Returns
-        -------
-        CatGt_wrapper
-            Returns self for method chaining
-        """
-        if not isinstance(options, dict):
-            raise TypeError("options must be a dict")
-        # _update_options will ignore None values
-        self._update_options(options)
-        return self
-    
-    def _update_options(self, params: Dict[str, Any]) -> None:
-        """Update options dictionary, filtering out None values."""
-        for key, value in params.items():
-            if value is not None:
-                self.options[key] = value
-    
-    def remove_option(self, key: str) -> 'CatGt_wrapper':
-        """Remove an option by key."""
-        self.options.pop(key, None)
-        return self
-    
-    def clear_options(self) -> 'CatGt_wrapper':
-        """Clear all options while keeping base configuration."""
-        self.options.clear()
-        return self
-        
-    def build_command(self) -> List[str]:
-        """
-        Build the CatGt command as a list suitable for subprocess.
-
-        Returns
-        -------
-        List[str]
-            The command and its arguments as a list.
-
-        Notes
-        -----
-        This method returns a list (e.g. ["CatGt", "-dir=/data", "-run=g0", ...])
-        so it is safe to pass directly to subprocess.run(). If you need the
-        printable command string, use `dry_run()` which will join the list
-        for display purposes.
-        """
-        # Reuse get_command_args which already returns a list of args
-        return self.get_command_args()
 
     def set_supercat(
         self,
         runs: List[Dict[str, str]],
         trim_edges: bool = False,
         skip_ni_ob_bin: bool = False,
-        dest: Optional[str] = None,
-        **kwargs
-        ) -> 'CatGt_wrapper':
-        """
-        Set supercat options for concatenating multiple runs.
-
-        Parameters
-        ----------
-        runs : List[Dict[str, str]]
-            List of dictionaries containing 'dir' and 'run_ga' keys for each run to concatenate.
-            Each dict should have:
-            - 'dir': Parent directory of the run folder
-            - 'run_ga': Run name with g-index (e.g., "myrun_g0" or "catgt_myrun_g7")
-        trim_edges : bool, optional
-            If True, trim trailing edges of files to align streams via sync edges
-        skip_ni_ob_bin : bool, optional
-            If True, skip processing NI/OB binary files (use when first pass didn't create them)
-        dest : str, optional
-            Required destination directory for supercat output
-        **kwargs
-            Additional supercat options
-            
-        Returns
-        -------
-        CatGt_wrapper
-            Returns self for method chaining
-            
-        Notes
-        -----
-        - Supercat requires that first-pass CatGt has been run on all listed runs
-        - All runs must have 'tcat' tagged output files
-        - The dest parameter is required for supercat operations
-        - Extractors used in first pass must be specified again for supercat
-
-        Examples
-        --------
-        Concatenate two runs:
-        >>> catgt = CatGt_wrapper(
-        ...     catgt_path="/usr/local/bin/CatGt",
-        ...     basepath="/data",  # This will be ignored for supercat
-        ...     run_name="combined"  # This will be ignored for supercat
-        ... )
-        >>> runs = [
-        ...     {'dir': '/data/run1', 'run_ga': 'experiment1_g0'},
-        ...     {'dir': '/data/run2', 'run_ga': 'experiment2_g0'}
-        ... ]
-        >>> catgt.set_supercat(runs, trim_edges=True, dest="/data/output")
-        >>> catgt.set_filters(ap=True, lf=True)  # Specify which streams to supercat
-        >>> result = catgt.run()
-
-        With catgt_ output folders from first pass:
-        >>> runs = [
-        ...     {'dir': '/data/output', 'run_ga': 'catgt_run1_g0'},
-        ...     {'dir': '/data/output', 'run_ga': 'catgt_run2_g0'}
-        ... ]
-        >>> catgt.set_supercat(runs, dest="/data/final")
-        """
-
+        dest: Optional[Union[str, os.PathLike[str]]] = None,
+        **kwargs: Any,
+    ) -> "CatGt_wrapper":
         if not runs or not isinstance(runs, list):
             raise ValueError("runs must be a non-empty list of dictionaries")
 
         if not dest:
             raise ValueError("dest parameter is required for supercat operations")
 
-        # Validate each run entry
-        for i, run in enumerate(runs):
+        supercat_elements = []
+        for index, run in enumerate(runs):
             if not isinstance(run, dict):
-                raise ValueError(f"Run entry {i} must be a dictionary")
-            if 'dir' not in run or 'run_ga' not in run:
-                raise ValueError(f"Run entry {i} must contain 'dir' and 'run_ga' keys")
+                raise ValueError(f"Run entry {index} must be a dictionary")
+            if "dir" not in run or "run_ga" not in run:
+                raise ValueError(f"Run entry {index} must contain 'dir' and 'run_ga' keys")
+            supercat_elements.append(f"{{{run['dir']},{run['run_ga']}}}")
 
-        # Build the supercat string: {dir,run_ga}{dir,run_ga}...
-        supercat_elements = [f"{{{run['dir']},{run['run_ga']}}}" for run in runs]
-        supercat_str = ''.join(supercat_elements)
-
-        params = {
-            'supercat': supercat_str,
-            'dest': dest,
+        params: Dict[str, Any] = {
+            "supercat": "".join(supercat_elements),
+            "dest": os.fspath(dest),
         }
-
         if trim_edges:
-            params['supercat_trim_edges'] = True
-
+            params["supercat_trim_edges"] = True
         if skip_ni_ob_bin:
-            params['supercat_skip_ni_ob_bin'] = True
+            params["supercat_skip_ni_ob_bin"] = True
 
-        # Add any additional kwargs
         params.update(kwargs)
-
         self._update_options(params)
         return self
-    
+
+    def set_option(self, key: str, value: Any) -> "CatGt_wrapper":
+        self._update_options({key: value})
+        return self
+
+    def set_options(self, options: Dict[str, Any]) -> "CatGt_wrapper":
+        if not isinstance(options, dict):
+            raise TypeError("options must be a dict")
+        self._update_options(options)
+        return self
+
+    def remove_option(self, key: str) -> "CatGt_wrapper":
+        self.options.pop(_normalize_option_name(key), None)
+        return self
+
+    def clear_options(self) -> "CatGt_wrapper":
+        self.options.clear()
+        self.extraction.clear()
+        return self
+
+    def validate(self) -> None:
+        """Validate the current command configuration before rendering."""
+        if not self.catgt_path:
+            raise ValueError("catgt_path cannot be empty")
+        if not self.basepath:
+            raise ValueError("basepath cannot be empty")
+        if not self.run:
+            raise ValueError("run cannot be empty")
+        if "supercat" in self.options and "dest" not in self.options:
+            raise ValueError("supercat commands require dest to be set")
+
+    def _update_options(self, params: Dict[str, Any]) -> None:
+        for key, value in params.items():
+            if value is None:
+                continue
+            normalized_key = _normalize_option_name(str(key))
+            if isinstance(value, Path):
+                self.options[normalized_key] = str(value)
+            else:
+                self.options[normalized_key] = value
+
     def _format_options(self) -> List[str]:
-        """Format additional options as command line arguments."""
-        formatted = []
-        
+        formatted: List[str] = []
         for key, value in self.options.items():
-            # Convert Python naming convention to CatGt naming
-            # option_name = key.replace("_", "-")
-            option_name = key
-            
             if isinstance(value, bool):
                 if value:
-                    # Boolean flags are just present when True
-                    formatted.append(f"-{option_name}")
-            elif isinstance(value, (list, tuple)):
-                # List values are comma-separated
-                formatted.append(f"-{option_name}={','.join(map(str, value))}")
-            else:
-                # Regular key=value pairs
-                formatted.append(f"-{option_name}={value}")
-                
+                    formatted.append(f"-{key}")
+                continue
+
+            if isinstance(value, (list, tuple)):
+                formatted.append(f"-{key}={','.join(map(str, value))}")
+                continue
+
+            formatted.append(f"-{key}={value}")
         return formatted
-    
-    def get_command_args(self) -> List[str]:
-        """
-        Get the command and arguments as a list suitable for subprocess.
-            
-        Returns
-        -------
-        List[str]
-            List of command and arguments
-            
-        Examples
-        --------
-        >>> catgt = CatGt("/usr/local/bin/CatGt", "/data", "g0", gate=0)
-        >>> catgt.set_filters(ap=True)
-        >>> args = catgt.get_command_args()
-        """
-        args = [self.catgt_path]
-        args.append(f"-dir={self.basepath}")
-        args.append(f"-run={self.run_name}")
-        
+
+    def get_command_args(
+        self,
+        catgt_path: Optional[Union[str, os.PathLike[str]]] = None,
+    ) -> List[str]:
+        self.validate()
+        executable = os.fspath(catgt_path) if catgt_path is not None else self.catgt_path
+
+        args = [
+            executable,
+            f"-dir={self.basepath}",
+            f"-run={self.run}",
+        ]
         if self.gate is not None:
             args.append(f"-g={self.gate}")
         if self.trigger is not None:
             args.append(f"-t={self.trigger}")
 
-        # Handle extraction options (xa, xd, xia, xid) - each list item becomes separate arg
-        if hasattr(self, 'extraction'):
-            for key in ['xa', 'xd', 'xia', 'xid']:
-                if key in self.extraction:
-                    for item in self.extraction[key]:
-                        args.append(f"-{key}={item}")
-                
+        for key in EXTRACTION_KEYS:
+            for item in self.extraction.get(key, []):
+                args.append(f"-{key}={item}")
+
         args.extend(self._format_options())
-        
         return args
-    
+
+    def build_command(
+        self,
+        catgt_path: Optional[Union[str, os.PathLike[str]]] = None,
+    ) -> str:
+        return shlex.join(self.get_command_args(catgt_path=catgt_path))
+
+    def dry_run(
+        self,
+        catgt_path: Optional[Union[str, os.PathLike[str]]] = None,
+    ) -> str:
+        command = self.build_command(catgt_path=catgt_path)
+        print(command)
+        return command
+
     def run(
         self,
         check: bool = True,
         capture_output: bool = True,
         timeout: Optional[float] = None,
-        **subprocess_kwargs
-    ) -> subprocess.CompletedProcess:
-        """
-        Execute the CatGt command using subprocess.
-        
-        Parameters
-        ----------
-        check : bool, default=True
-            If True, raise CalledProcessError if command returns non-zero exit status
-        capture_output : bool, default=True
-            If True, capture stdout and stderr
-        timeout : float, optional
-            Timeout in seconds for the command execution
-        **subprocess_kwargs
-            Additional keyword arguments passed to subprocess.run()
-            
-        Returns
-        -------
-        subprocess.CompletedProcess
-            The result of the subprocess execution with returncode, stdout, stderr
-            
-        Raises
-        ------
-        subprocess.CalledProcessError
-            If check=True and the command returns non-zero exit status
-        subprocess.TimeoutExpired
-            If timeout is specified and exceeded
-        FileNotFoundError
-            If the CatGt executable is not found
-            
-        Examples
-        --------
-        Basic execution:
-        >>> catgt = CatGt("/usr/local/bin/CatGt", "/data", "g0", gate=0)
-        >>> catgt.set_filters(ap=True, loccar=2)
-        >>> result = catgt.run()
-        >>> print(f"Exit code: {result.returncode}")
-        >>> print(result.stdout.decode())
-        
-        With custom timeout:
-        >>> result = catgt.run(timeout=300)  # 5 minute timeout
-        
-        Without output capture (for large outputs):
-        >>> result = catgt.run(capture_output=False)
-        """
-        args = self.get_command_args()
-        
+        catgt_path: Optional[Union[str, os.PathLike[str]]] = None,
+        **subprocess_kwargs: Any,
+    ) -> subprocess.CompletedProcess[Any]:
+        args = self.get_command_args(catgt_path=catgt_path)
         try:
-            result = subprocess.run(
+            return subprocess.run(
                 args,
                 check=check,
                 capture_output=capture_output,
                 timeout=timeout,
-                **subprocess_kwargs
+                **subprocess_kwargs,
             )
-            return result
-            
-        except subprocess.CalledProcessError as e:
-            error_msg = f"CatGt command failed with exit code {e.returncode}"
-            if e.stderr:
-                error_msg += f"\nStderr: {e.stderr.decode()}"
-            raise subprocess.CalledProcessError(
-                e.returncode, e.cmd, e.output, e.stderr
-            ) from e
-            
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
             raise FileNotFoundError(
-                f"CatGt executable not found at: {self.catgt_path}\n"
-                f"Please verify the path is correct."
-            )
-    
+                f"CatGt executable not found at: {args[0]}. "
+                "Set catgt_path to the correct executable."
+            ) from exc
+
     def run_async(
         self,
-        **subprocess_kwargs
-    ) -> subprocess.Popen:
-        """
-        Execute the CatGt command asynchronously using subprocess.Popen.
-        
-        This allows you to start the process and continue with other work,
-        checking on it periodically or waiting for completion later.
-        
-        Parameters
-        ----------
-        **subprocess_kwargs
-            Keyword arguments passed to subprocess.Popen()
-            
-        Returns
-        -------
-        subprocess.Popen
-            The Popen object for the running process
-            
-        Examples
-        --------
-        Start process and wait for completion:
-        >>> catgt = CatGt("/usr/local/bin/CatGt", "/data", "g0", gate=0)
-        >>> catgt.set_filters(ap=True)
-        >>> process = catgt.run_async()
-        >>> # Do other work...
-        >>> returncode = process.wait()
-        
-        Monitor progress:
-        >>> process = catgt.run_async(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        >>> while process.poll() is None:
-        ...     # Process is still running
-        ...     time.sleep(1)
-        >>> stdout, stderr = process.communicate()
-        """
-        args = self.get_command_args()
-        return subprocess.Popen(args, **subprocess_kwargs)
-    
-    def dry_run(self) -> str:
-        """
-        Print the command that would be executed without running it.
-        
-        Useful for debugging and verifying the command before execution.
-        
-        Returns
-        -------
-        str
-            The command string that would be executed
-            
-        Examples
-        --------
-        >>> catgt = CatGt("/usr/local/bin/CatGt", "/data", "g0", gate=0)
-        >>> catgt.set_filters(ap=True, loccar=2)
-        >>> print(catgt.dry_run())
-        /usr/local/bin/CatGt -dir=/data -run=g0 -g=0 -ap -loccar=2
-        """
-        # build_command now returns a list suitable for subprocess; join for display
-        cmd_list = self.build_command()
-        cmd_str = " ".join(cmd_list)
-        print(f"Would execute: {cmd_str}")
-        return cmd_str
-    
+        catgt_path: Optional[Union[str, os.PathLike[str]]] = None,
+        **subprocess_kwargs: Any,
+    ) -> subprocess.Popen[Any]:
+        return subprocess.Popen(
+            self.get_command_args(catgt_path=catgt_path),
+            **subprocess_kwargs,
+        )
+
     def clone(
         self,
-        basepath: Optional[str] = None,
+        basepath: Optional[Union[str, os.PathLike[str]]] = None,
+        run: Optional[str] = None,
         run_name: Optional[str] = None,
         gate: Optional[int] = None,
         trigger: Optional[int] = None,
-        dest: Optional[str] = None,
+        dest: Optional[Union[str, os.PathLike[str]]] = None,
         preserve_dest: bool = True,
-        **kwargs
-        ) -> 'CatGt_wrapper':
-        """
-        Create a new CatGt_wrapper instance with modified input/output options.
-        
-        All processing options (filters, extraction, CAR, etc.) are copied to the new
-        instance. Only the specified parameters are changed.
-        
-        Parameters
-        ----------
-        basepath : str, optional
-            New base directory path. If None, uses current basepath
-        run_name : str, optional
-            New run name. If None, uses current run_name
-        gate : int, optional
-            New gate index. If None, uses current gate
-        trigger : int, optional
-            New trigger index. If None, uses current trigger
-        dest : str, optional
-            New destination directory. If None and preserve_dest=True, uses current dest
-        preserve_dest : bool, default=True
-            If True and dest is None, copy the current dest option from self.options
-            If False and dest is None, remove dest from the cloned instance
-        **kwargs
-            Additional options to override in the new instance
-            
-        Returns
-        -------
-        CatGt_wrapper
-            New instance with modified parameters
-            
-        Examples
-        --------
-        Process multiple runs with same settings:
-        >>> # Set up base configuration
-        >>> catgt = CatGt_wrapper(
-        ...     catgt_path="/usr/local/bin/CatGt",
-        ...     basepath="/data/run1",
-        ...     run_name="exp1",
-        ...     gate=0
-        ... )
-        >>> catgt.set_filters(ap=True, loccar=2)
-        >>> catgt.set_output(dest="/processed")
-        >>> 
-        >>> # Process first run
-        >>> catgt.run()
-        >>> 
-        >>> # Clone for second run with same settings
-        >>> catgt2 = catgt.clone(basepath="/data/run2", run_name="exp2")
-        >>> catgt2.run()
-        >>> 
-        >>> # Clone for third run with different output
-        >>> catgt3 = catgt.clone(
-        ...     basepath="/data/run3",
-        ...     run_name="exp3",
-        ...     dest="/processed/batch2"
-        ... )
-        >>> catgt3.run()
-        """
-        
-        # Create new instance with updated base parameters
-        new_catgt = CatGt_wrapper(
+        **kwargs: Any,
+    ) -> "CatGt_wrapper":
+        cloned = CatGt_wrapper(
             catgt_path=self.catgt_path,
             basepath=basepath if basepath is not None else self.basepath,
-            run_name=run_name if run_name is not None else self.run_name,
-            gate=gate if gate is not None else self.gate,
-            trigger=trigger if trigger is not None else self.trigger,
-            prb_fld=self.prb_fld
+            run=run if run is not None else (run_name if run_name is not None else self.run),
+            gate=self.gate if gate is None else gate,
+            trigger=self.trigger if trigger is None else trigger,
         )
-        
-        # Deep copy all options
-        new_catgt.options = self.options.copy()
-        
-        # Handle dest parameter specially
+        cloned.options = copy.deepcopy(self.options)
+        cloned.extraction = copy.deepcopy(self.extraction)
+
         if dest is not None:
-            new_catgt.options['dest'] = dest
+            cloned.options["dest"] = os.fspath(dest)
         elif not preserve_dest:
-            new_catgt.options.pop('dest', None)
-        # If dest is None and preserve_dest is True, keep the copied dest
-        
-        # Apply any additional kwargs
-        new_catgt._update_options(kwargs)
-        
-        return new_catgt
-    
+            cloned.options.pop("dest", None)
+
+        cloned._update_options(kwargs)
+        return cloned
+
     def to_dict(self) -> Dict[str, Any]:
-        """Export configuration as a dictionary."""
         return {
-            'catgt_path': self.catgt_path,
-            'basepath': self.basepath,
-            'run': self.run,
-            'gate': self.gate,
-            'trigger': self.trigger,
-            'options': self.options.copy()
+            "catgt_path": self.catgt_path,
+            "basepath": self.basepath,
+            "run": self.run,
+            "gate": self.gate,
+            "trigger": self.trigger,
+            "options": copy.deepcopy(self.options),
+            "extraction": copy.deepcopy(self.extraction),
         }
-    
+
     def __str__(self) -> str:
-        """Return the command string when converting to string.
+        return self.build_command()
 
-        Since `build_command` returns a list (for subprocess), join it for
-        human-readable output.
-        """
-        return " ".join(self.build_command())
-    
+    def __repr__(self) -> str:
+        return (
+            "CatGt("
+            f"basepath={self.basepath!r}, "
+            f"run={self.run!r}, "
+            f"gate={self.gate!r}, "
+            f"trigger={self.trigger!r}, "
+            f"catgt_path={self.catgt_path!r}, "
+            f"options={self.options!r}"
+            ")"
+        )
+
     @staticmethod
-    def parse_fyi_supercat_element(fyi_path: str) -> Dict[str, str]:
-        """
-        Parse a supercat element from a CatGt FYI file.
-        
-        Parameters
-        ----------
-        fyi_path : str
-            Path to the run_ga_fyi.txt file from a first-pass CatGt run
-            
-        Returns
-        -------
-        Dict[str, str]
-            Dictionary with 'dir' and 'run_ga' keys suitable for set_supercat()
-            
-        Examples
-        --------
-        >>> element = CatGt_wrapper.parse_fyi_supercat_element("/data/run1_g0_fyi.txt")
-        >>> runs = [element]
-        >>> catgt.set_supercat(runs, dest="/data/output")
-        """
-        import re
-        
-        if not os.path.exists(fyi_path):
-            raise FileNotFoundError(f"FYI file not found: {fyi_path}")
-        
-        with open(fyi_path, 'r') as f:
-            content = f.read()
-        
-        # Look for the supercat_element line
-        match = re.search(r'supercat_element=\{([^,]+),([^}]+)\}', content)
+    def parse_fyi_supercat_element(fyi_path: Union[str, os.PathLike[str]]) -> Dict[str, str]:
+        path = Path(fyi_path)
+        if not path.exists():
+            raise FileNotFoundError(f"FYI file not found: {path}")
+
+        content = path.read_text(encoding="utf-8")
+        match = re.search(r"supercat_element=\{([^,]+),([^}]+)\}", content)
         if not match:
-            raise ValueError(f"No supercat_element found in {fyi_path}")
-        
+            raise ValueError(f"No supercat_element found in {path}")
+
         return {
-            'dir': match.group(1),
-            'run_ga': match.group(2)
+            "dir": match.group(1),
+            "run_ga": match.group(2),
         }
 
     @staticmethod
-    def build_supercat_from_fyi_files(fyi_paths: List[str]) -> List[Dict[str, str]]:
-        """
-        Build a runs list for supercat from multiple FYI files.
-        
-        Parameters
-        ----------
-        fyi_paths : List[str]
-            List of paths to FYI files from first-pass CatGt runs
-            
-        Returns
-        -------
-        List[Dict[str, str]]
-            List of run dictionaries suitable for set_supercat()
-            
-        Examples
-        --------
-        >>> fyi_files = [
-        ...     "/data/run1/run1_g0_fyi.txt",
-        ...     "/data/run2/run2_g0_fyi.txt"
-        ... ]
-        >>> runs = CatGt_wrapper.build_supercat_from_fyi_files(fyi_files)
-        >>> catgt.set_supercat(runs, dest="/data/combined")
-        """
-        runs = []
-        for fyi_path in fyi_paths:
-            runs.append(CatGt_wrapper.parse_fyi_supercat_element(fyi_path))
-        return runs 
+    def build_supercat_from_fyi_files(
+        fyi_paths: Sequence[Union[str, os.PathLike[str]]]
+    ) -> List[Dict[str, str]]:
+        return [CatGt_wrapper.parse_fyi_supercat_element(path) for path in fyi_paths]
 
+
+CatGtWrapper = CatGt_wrapper

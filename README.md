@@ -9,7 +9,13 @@ CatGt is a command-line tool for preprocessing SpikeGLX data from Neuropixels pr
 ## Installation
 
 ```bash
-pip install purrito
+pip install purrito-catgt-wrapper
+```
+
+Import it in Python as:
+
+```python
+from purrito import CatGt
 ```
 
 For development:
@@ -35,7 +41,7 @@ catgt = CatGt(
 # Check the command that will be executed
 catgt.dry_run()
 
-#Output: CatGt -dir=/path/to/data -run=g0 -g=0 -t=0
+# Output: CatGt -dir=/path/to/data -run=g0 -g=0 -t=0
 
 
 # Run catgt
@@ -90,7 +96,7 @@ args = catgt.get_command_args(catgt_path="/usr/local/bin/CatGt")
 
 - **Intuitive Python API**: Specify options using Python arguments
 - **Flexible Options**: Support for boolean flags, string values, numeric values, and lists
-- **Automatic Formatting**: Converts Python naming conventions (underscores) to CatGt conventions (dashes)
+- **Native CatGt Flags**: Uses CatGt's underscore-based option names such as `prb_fld`
 - **Path Handling**: Automatically converts relative paths to absolute paths
 - **Command Generation**: Generate command strings for direct use or subprocess execution
 
@@ -99,14 +105,15 @@ args = catgt.get_command_args(catgt_path="/usr/local/bin/CatGt")
 ### CatGt Class
 
 ```python
-CatGt(basepath, run, gate=None, trigger=None, **options)
+CatGt(basepath, run=None, gate=None, trigger=None, catgt_path="CatGt", **options)
 ```
 
 **Parameters:**
 - `basepath` (str): Base directory path containing the SpikeGLX data
-- `run` (str): Run name (e.g., "g0", "g0_t0")
+- `run` (str, optional): Run name (e.g., "g0", "g0_t0"). If omitted, it is inferred from `basepath`
 - `gate` (int, optional): Gate index
 - `trigger` (int, optional): Trigger index
+- `catgt_path` (str, optional): Path to the CatGt executable. Defaults to `CatGt`
 - `**options`: Additional CatGt options as keyword arguments
 
 **Methods:**
@@ -132,7 +139,6 @@ pytest tests/
 This package is automatically published to PyPI when a new GitHub release is created. To create a new release:
 
 1. Update the version number in:
-   - `setup.py`
    - `purrito/__init__.py`
 
 2. Create a new GitHub release:
@@ -152,7 +158,7 @@ This package is automatically published to PyPI when a new GitHub release is cre
 Before the first release, you need to configure PyPI trusted publishing:
 
 1. Go to [PyPI](https://pypi.org/) and create an account if you don't have one
-2. Create the `purrito` project on PyPI (or wait for the first upload)
+2. Create the `purrito-catgt-wrapper` project on PyPI (or wait for the first upload)
 3. Go to your project's settings on PyPI
 4. Under "Publishing", add a new "trusted publisher"
 5. Configure it with:

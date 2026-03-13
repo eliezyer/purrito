@@ -97,7 +97,7 @@ class TestCatGtOptions(unittest.TestCase):
         catgt = CatGt(basepath="/data/test", run="g0", prb=0, prb_fld=1)
         cmd = catgt.build_command()
         self.assertIn("-prb=0", cmd)
-        self.assertIn("-prb-fld=1", cmd)
+        self.assertIn("-prb_fld=1", cmd)
         
     def test_list_options(self):
         """Test list value options (comma-separated)."""
@@ -112,11 +112,11 @@ class TestCatGtOptions(unittest.TestCase):
         self.assertIn("-range=100,200", cmd)
         
     def test_underscore_to_dash_conversion(self):
-        """Test that underscores in option names are converted to dashes."""
+        """Test that CatGt option names preserve underscores."""
         catgt = CatGt(basepath="/data/test", run="g0", prb_fld=1, xa_fld=2)
         cmd = catgt.build_command()
-        self.assertIn("-prb-fld=1", cmd)
-        self.assertIn("-xa-fld=2", cmd)
+        self.assertIn("-prb_fld=1", cmd)
+        self.assertIn("-xa_fld=2", cmd)
         
     def test_mixed_options(self):
         """Test command with mixed option types."""
@@ -137,6 +137,13 @@ class TestCatGtOptions(unittest.TestCase):
         self.assertIn("-dest=/output", cmd)
         self.assertIn("-prb=0", cmd)
         self.assertIn("-channels=0,1,2", cmd)
+
+    def test_bool_flags_render_without_values(self):
+        """Test boolean flags render as bare CatGt flags."""
+        catgt = CatGt(basepath="/data/test", run="g0", prb_fld=True, t_miss_ok=True)
+        cmd = catgt.build_command()
+        self.assertIn("-prb_fld", cmd)
+        self.assertIn("-t_miss_ok", cmd)
 
 
 class TestCatGtUtilityMethods(unittest.TestCase):
@@ -166,6 +173,23 @@ class TestCatGtUtilityMethods(unittest.TestCase):
         self.assertIn("-dir=", str_cmd)
         self.assertIn("-run=g0", str_cmd)
 
+    def test_to_dict(self):
+        """Test exporting configuration to a dictionary."""
+        catgt = CatGt(basepath="/data/test", run="g0", gate=0, ap=True)
+        config = catgt.to_dict()
+        self.assertEqual(config["run"], "g0")
+        self.assertEqual(config["gate"], 0)
+        self.assertTrue(config["options"]["ap"])
+
+    def test_clone_preserves_extraction(self):
+        """Test clone copies extraction and allows path changes."""
+        catgt = CatGt(basepath="/data/test", run="g0")
+        catgt.set_extraction(xd=["0,0,8,1,0"]).set_output(dest="/output")
+        clone = catgt.clone(basepath="/data/other", run="g1")
+        self.assertIn("-xd=0,0,8,1,0", clone.build_command())
+        self.assertIn("-dest=/output", clone.build_command())
+        self.assertIn("-run=g1", clone.build_command())
+
 
 class TestCatGtRealWorldUseCases(unittest.TestCase):
     """Test real-world use cases."""
@@ -193,7 +217,7 @@ class TestCatGtRealWorldUseCases(unittest.TestCase):
         self.assertIn("-ap", cmd)
         self.assertIn("-lf", cmd)
         self.assertIn("-prb=0", cmd)
-        self.assertIn("-prb-fld=1", cmd)
+        self.assertIn("-prb_fld=1", cmd)
         
     def test_multi_probe_setup(self):
         """Test command for multiple probes."""
@@ -206,7 +230,7 @@ class TestCatGtRealWorldUseCases(unittest.TestCase):
             prb_list=[0, 1, 2]
         )
         cmd = catgt.build_command()
-        self.assertIn("-prb-list=0,1,2", cmd)
+        self.assertIn("-prb_list=0,1,2", cmd)
         
     def test_with_destination_path(self):
         """Test command with custom destination path."""
@@ -218,6 +242,13 @@ class TestCatGtRealWorldUseCases(unittest.TestCase):
         )
         cmd = catgt.build_command()
         self.assertIn("-dest=/data/processed", cmd)
+
+    def test_run_name_alias(self):
+        """Test compatibility with the run_name keyword."""
+        catgt = CatGt(basepath="/data/input", run_name="g0", ap=True)
+        cmd = catgt.build_command()
+        self.assertIn("-run=g0", cmd)
+        self.assertIn("-ap", cmd)
 
 
 if __name__ == "__main__":

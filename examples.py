@@ -25,7 +25,7 @@ def basic_example():
     # Configure filters and input probe
     catgt.set_filters(ap=True, lf=True).set_input(prb=0)
 
-    cmd = " ".join(catgt.build_command())
+    cmd = catgt.build_command()
     print(f"Command: {cmd}")
     print()
 
@@ -68,7 +68,7 @@ def multi_probe_example():
     # prb_list is accepted through set_input's **kwargs and will be formatted
     catgt.set_filters(ap=True, lf=True).set_input(prb=0, prb_list=[0, 1, 2, 3])
 
-    print(" ".join(catgt.build_command()))
+    print(catgt.build_command())
     print()
 
 
@@ -114,7 +114,7 @@ def custom_options_example():
     # Use extraction and output grouped methods; lists are supported
     catgt.set_filters(ap=True, lf=True).set_input(prb=0, prb_fld=1).set_extraction(xa=[0, 100, 200]).set_output(dest="/output")
 
-    print(" ".join(catgt.build_command()))
+    print(catgt.build_command())
     print()
 
 
